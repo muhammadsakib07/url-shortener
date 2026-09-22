@@ -6,11 +6,10 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 )
-
-// ---- Data shapes ----
 
 type ShortenRequest struct {
 	URL string `json:"url"`
@@ -21,15 +20,8 @@ type ShortenResponse struct {
 	Code     string `json:"code"`
 }
 
-// ---- Storage ----
-
-// Store short code -> original URL
 var urlStore = make(map[string]string)
-
-// Protects urlStore from concurrent access (multiple requests at once)
 var mu sync.Mutex
-
-// ---- Helpers ----
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
@@ -40,8 +32,6 @@ func generateShortCode(length int) string {
 	}
 	return string(b)
 }
-
-// ---- Handlers ----
 
 func shortenHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -62,8 +52,14 @@ func shortenHandler(w http.ResponseWriter, r *http.Request) {
 	urlStore[code] = req.URL
 	mu.Unlock()
 
+	scheme := "http"
+	if r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	baseURL := scheme + "://" + r.Host
+
 	resp := ShortenResponse{
-		ShortURL: "http://localhost:8080/" + code,
+		ShortURL: baseURL + "/" + code,
 		Code:     code,
 	}
 
@@ -86,14 +82,17 @@ func redirectHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, originalURL, http.StatusFound)
 }
 
-// ---- Entry point ----
-
 func main() {
 	http.HandleFunc("/shorten", shortenHandler)
 	http.HandleFunc("/", redirectHandler)
 
-	fmt.Println("Server running at http://localhost:8080")
-	err := http.ListenAndServe(":8080", nil)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	fmt.Println("Server running on port " + port)
+	err := http.ListenAndServe(":"+port, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
